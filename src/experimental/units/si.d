@@ -96,8 +96,18 @@ enum degree = scale!(radian, PI/180, "degree");
 
 unittest
 {
-    Quantity!Gram mass1 = (485f * kilogram).convert!Gram;
+    import std.conv, std.format;
+    alias Kilogram = PrefixedUnit!(Gram, 3, SiPrefixSystem);
+    
+    static assert(isConvertibleTo!(Gram)(1f * kilogram));
+    Quantity!Gram mass1;
+    mass1 = (485f * kilogram);
     assert(mass1.toValue == 485f * 10^^3);
+    Quantity!Gram mass2 = (485f * kilogram).convert!Gram;
+    assert(mass1 == mass2);
+
+    Quantity!Kilogram mass3 = mass1;
+    assert(mass1.toValue == mass3.toValue*1000, format("`mass1` = %s, `mass3` = %s", mass1.toValue, mass3.toValue));
 }
 
 auto cos(Q)(Q angle)

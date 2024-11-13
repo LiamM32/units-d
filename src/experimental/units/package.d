@@ -173,7 +173,7 @@ mixin template UnitImpl()
     }
 
     /// ditto
-    auto opBinaryRight(string op : "*", V)(V lhs)
+    auto opBinaryRight(string op : "*", V)(V lhs) pure
         if (!(isUnit!V || isQuantity!V))
     {
         return Quantity!(typeof(this), V).fromValue(lhs);
@@ -349,7 +349,7 @@ private
     template isBaseUnitExp(T)
     {
         // We can't fold this into a single expression because the special
-        // is syntax works only inside static ifs.
+        // `is` syntax works only inside `static if`s.
         static if (is(T _ : BaseUnitExp!(B, R), B, R))
         {
             enum isBaseUnitExp = true;
@@ -714,24 +714,32 @@ struct Quantity(Unit, ValueType = double)
 
     /**
      * Two quantites of the same unit are implicitely convertible on
-     * assignment if the underlying value types are.
+     * assignment if the underlying value types are. Now also works
+     * with convertible units.
      *
      * Example:
      * ---
      * Quantity!(metre, float) a = 2 * metre;
      * ---
      */
-    this(OtherV)(Quantity!(Unit, OtherV) other)
-        if (isAssignable!(ValueType, OtherV))
+    this(OtherU, OtherV)(Quantity!(OtherU, OtherV) other)
+        if(isAssignable!(ValueType, OtherV) &
+           is(OtherU:Unit) |
+           __traits(compiles, convert!Unit(other))
+        )
     {
-        value = other.value;
+        opAssign(other);
     }
 
     /// ditto
-    ref Quantity opAssign(OtherV)(Quantity!(Unit, OtherV) other)
-        if (isAssignable!(ValueType, OtherV))
+    ref Quantity opAssign(OtherU, OtherV)(Quantity!(OtherU, OtherV) other)
+        if(isAssignable!(ValueType, OtherV) &
+           is(OtherU:Unit) |
+           __traits(compiles, convert!Unit(other))
+        )
     {
-        value = other.value;
+        static if(is(OtherUnit:Unit)) value = other.value;
+        else value = convert!(Unit)(other).value;
         return this;
     }
 
@@ -1066,7 +1074,7 @@ struct Quantity(Unit, ValueType = double)
     }
 
 private:
-    static Quantity fromValue(ValueType value)
+    static Quantity fromValue(ValueType value) pure
     {
         Quantity q = void;
         q.value = value;
@@ -1081,6 +1089,12 @@ template Quantity(alias unit, ValueType = double)
     if (isUnitInstance!unit)
 {
     alias Quantity = Quantity!(typeof(unit), ValueType);
+}
+
+template Quantity(unit, ValueType = double)
+    if (isBaseUnitExp!unit)
+{
+    alias Quantity = Quantity!(DerivedUnit!(unit), ValueType);
 }
 
 ///
@@ -1340,25 +1354,40 @@ auto convert(alias targetUnit, Q : Quantity!(U, V), U, V)(Q q)
  * assert(!isConvertibleTo!metre(2 * kilogram));
  * ---
  */
-bool isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V)(Q q)
+bool isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V)(const Q q)
     if (isUnit!TargetUnit)
 {
     return __traits(compiles, GetConversion!(U, TargetUnit, V).Result);
 }
 
-// TODO make this work
+// TODO: Make this work
 // enum ConvertibleTo(Q : Quantity!(U, V), U, V, TargetUnit) = __traits(compiles, GetConversion!(U, TargetUnit, V).Result);
 
 /// ditto
-bool isConvertibleTo(alias targetUnit, Q : Quantity!(U, V), U, V)(Q q)
+bool isConvertibleTo(alias targetUnit, Q : Quantity!(U, V), U, V)(const Q q)
     if (isUnitInstance!targetUnit)
 {
     return isConvertibleTo!(typeof(targetUnit))(q);
 }
 
+//TODO: Make these work to determine whether a unit type is convertible to another.
+/*template isConvertibleTo(TargetUnit, SourceUnit) if (isUnitInstance!TargetUnit && isUnitInstance!SourceUnit)
+{
+    enum isConvertibleTo = __traits(compiles, GetConversion!(SourceUnit, TargetUnit, V).Result);
+}
+
+template isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V) if (isUnitInstance!TargetUnit)
+{
+    enum isConvertibleTo = __traits(compiles, GetConversion!(U, TargetUnit, V).Result);
+}*/
+
 ///
 @safe pure nothrow @nogc unittest
 {
+    //TODO: Make these work
+    //static assert(__traits(compiles, GetConversion!(Foo, ScaledUnit!(Foo, Rational!(1,1000), "millifoo", "mf"))));
+    //static assert(isConvertibleTo!(Foo, ScaledUnit!(Foo, Rational!(1,1000), "millifoo", "mf")));
+    
     struct ConvertibleToFoo
     {
         mixin UnitImpl;
@@ -2104,7 +2133,8 @@ template Rational(int n, uint d = 1u)
 
 template isRational(T)
 {
-    static if (is(typeof(T.numerator) : int) &&
+    static if (is(T : uint) | is(T : int) |
+               is(typeof(T.numerator) : int) &&
                is(typeof(T.denominator) : uint) &&
                is(T : Rational!(T.numerator, T.denominator)))
     {
