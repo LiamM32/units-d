@@ -9,5 +9,7 @@
     ],
 
     "sourcePaths": [ "src" ],
-    "importPaths": [ "src" ]
+    "importPaths": [ "src" ],
+
+    "versions": ["autoConvert"]
 }

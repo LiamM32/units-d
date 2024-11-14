@@ -71,6 +71,9 @@ module experimental.units;
 
 import std.typetuple : AliasSeq, allSatisfy, staticMap;
 
+version(autoConvert) enum autoConvert = true;
+else enum autoConvert = false;
+
 @safe:
 
 /**
@@ -490,6 +493,19 @@ private
             }
             return result;
         }
+
+        // Converts all components into their base units, and multiples the value to compensate.
+        auto simplify(TValue)(TValue value) {
+            AliasSeq BaseTypes;
+            int exponent = 0;
+            static foreach(TUnit; BaseUnitExps) {
+                static assert(isPrefixedUnit!TUnit);
+                exponent += TUnit.exponent;
+                static if (TUnit !in BaseTypes) alias BaseTypes = AliasSeq!(BaseTypes, TUnit);
+            }
+
+            return Quantity!(DerivedUnit!BaseTypes, value*10.0^^exponent);
+        }
     }
 
     /*
@@ -620,6 +636,35 @@ private
 }
 
 /**
+* A combination of base units and an exponent. Can be made as a simplification
+* of a DerivedUnit. Instead of holding a separate exponent for each component,
+* it applies one exponent to the whole combination.
+*/
+/*import std.traits;
+protected struct UnitExp(BaseUnits...)
+    if (allSatisfy!(isUnit, BaseUnits))
+{
+    int exponent;
+}
+
+template UnitExp(DerUnit)
+    if(isDerivedUnit!DerUnit)
+{
+    alias BaseUnits = AliasSeq!();
+    int exponent = 0;
+    
+    static foreach(Unit; DerUnit.BaseUnitExps) {
+        static assert(isPrefixedUnit!Unit);
+        int exponent = exponent + Unit.Exp;
+        static if (TUnit !in BaseUnits) alias BaseUnits = AliasSeq!(BaseUnits, TUnit);
+    };
+
+    alias SortedBaseUnits = staticMap!(mangledName, staticMap!(GetBU, BaseUnits));
+
+    alias UnitExp = UnitExp!(SortedBaseUnits)(exponent);
+}*/
+
+/**
  * An affine unit – the most common case being a unit that is related to other
  * units representing the same physical quantity not by a scale factor, but by
  * a shift in the zero point.
@@ -723,8 +768,8 @@ struct Quantity(Unit, ValueType = double)
      * ---
      */
     this(OtherU, OtherV)(Quantity!(OtherU, OtherV) other)
-        if(isAssignable!(ValueType, OtherV) &
-           is(OtherU:Unit) |
+        if(isAssignable!(ValueType, OtherV) &&
+           is(OtherU:Unit) || autoConvert &&
            __traits(compiles, convert!Unit(other))
         )
     {
@@ -733,8 +778,8 @@ struct Quantity(Unit, ValueType = double)
 
     /// ditto
     ref Quantity opAssign(OtherU, OtherV)(Quantity!(OtherU, OtherV) other)
-        if(isAssignable!(ValueType, OtherV) &
-           is(OtherU:Unit) |
+        if(isAssignable!(ValueType, OtherV) &&
+           is(OtherU:Unit) || autoConvert &&
            __traits(compiles, convert!Unit(other))
         )
     {
@@ -759,6 +804,18 @@ struct Quantity(Unit, ValueType = double)
         if (is(typeof(cast(NewV) ValueType.init)))
     {
         return Quantity!(Unit, NewV).fromValue(cast(NewV) value);
+    }
+
+    /**
+     * Convert to a Quantity of a different unit but same value type. Experimental.
+     */
+    version(autoConvert)
+        @property auto opCast(T: Quantity!(NewUnit, NewV), NewUnit, NewV)()
+            if(!is(NewUnit : Unit))
+    {
+        static assert(is(NewV:ValueType), "Must use either the same unit, or the same value type.");
+
+        return this.convert!(T)(value);
     }
 
     // No way to specialize Quantity on AffineUnit (since it takes an alias
@@ -826,7 +883,7 @@ struct Quantity(Unit, ValueType = double)
         }
 
         /**
-         * Multplication/division by a plain value (i.e. a dimensionless quantity
+         * Multiplication/division by a plain value (i.e. a dimensionless quantity
          * not represented by a Quantity instance).
          *
          * Example:
@@ -909,7 +966,7 @@ struct Quantity(Unit, ValueType = double)
         }
 
         /// ditto
-        auto opBinaryRight(string op : "/", Lhs)(Lhs rhs)
+        auto opBinaryRight(string op : "/", Lhs)(Lhs lhs)
             if (isUnit!Lhs)
         {
             // We cannot just do value ^^ -1 because integer types cannot be
@@ -995,8 +1052,8 @@ struct Quantity(Unit, ValueType = double)
         }
 
         /// ditto
-        auto opBinaryRight(string op : "+", RhsV)(Quantity!(BaseUnit, RhsV) lhs)
-           if (is(typeof(ValueType.init + RhsV.init)))
+        auto opBinaryRight(string op : "+", LhsV)(Quantity!(BaseUnit, LhsV) lhs)
+           if (is(typeof(ValueType.init + LhsV.init)))
         {
             return Quantity!(Unit, typeof(value + lhs.value)).fromValue(value + lhs.value);
         }
@@ -1035,6 +1092,14 @@ struct Quantity(Unit, ValueType = double)
             return (value == rhs.value) ? 0 : (value < rhs.value ? -1 : 1);
         }
     }
+
+    /**
+     * Comparison with a quantity in a different but convertible unit.
+     */
+    auto opEquals(RhsU, RhsV)(Quantity!(RhsU, RhsV) rhs)
+        if (!is(RhsU : Unit) &&
+            is(typeof(ValueType.init == RhsV.init) : bool))
+        => opEquals(rhs.convert!(Quantity(Unit, RhsV))(rhs));
 
     /**
      * Returns a string representation of the quantity, consisting of the
@@ -1374,9 +1439,9 @@ bool isConvertibleTo(alias targetUnit, Q : Quantity!(U, V), U, V)(const Q q)
 /*template isConvertibleTo(TargetUnit, SourceUnit) if (isUnitInstance!TargetUnit && isUnitInstance!SourceUnit)
 {
     enum isConvertibleTo = __traits(compiles, GetConversion!(SourceUnit, TargetUnit, V).Result);
-}
+}*/
 
-template isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V) if (isUnitInstance!TargetUnit)
+/*template isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V) if (isUnitInstance!TargetUnit)
 {
     enum isConvertibleTo = __traits(compiles, GetConversion!(U, TargetUnit, V).Result);
 }*/

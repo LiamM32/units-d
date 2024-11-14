@@ -98,16 +98,47 @@ unittest
 {
     import std.conv, std.format;
     alias Kilogram = PrefixedUnit!(Gram, 3, SiPrefixSystem);
-    
+
+    //pragma(msg, UnitExp!(typeof(gram / mole)));
+    //pragma(msg, UnitExp!(typeof(milli!gram / milli!mole)));
+    //static assert(is(UnitExp!(typeof(gram / mole)) : UnitExp!(typeof(milli!gram / milli!mole))));
+
     static assert(isConvertibleTo!(Gram)(1f * kilogram));
+
     Quantity!Gram mass1;
     mass1 = (485f * kilogram);
     assert(mass1.toValue == 485f * 10^^3);
-    Quantity!Gram mass2 = (485f * kilogram).convert!Gram;
+    
+    version(autoConvert) Quantity!Gram mass2 = (485f * kilogram);
+    else Quantity!Gram mass2 = (485f * kilogram).convert!Gram;
     assert(mass1 == mass2);
 
     Quantity!Kilogram mass3 = mass1;
     assert(mass1.toValue == mass3.toValue*1000, format("`mass1` = %s, `mass3` = %s", mass1.toValue, mass3.toValue));
+    //assert(mass1 == mass3);
+
+    alias GramPerMole = typeof(gram / mole);
+    Quantity!GramPerMole molMass = mass2 / mole;
+    molMass = 94f * milli!gram / milli!mole;
+    molMass = 37f * kilo!gram * milli!gram / gram / mole;
+
+    Quantity!(typeof(milli!mole))[10] millimoleArray;
+    for(ushort i=0; i<10; i++) {
+        millimoleArray[i] = (i * 35.0 * mass2 / milli!gram) * pico!mole;
+    }
+
+    /*Quantity!(typeof(milli!meter))[char] lengthMap;
+    lengthMap = [
+        'a': 4545560.456 * micro!meter,
+        'b': 16.73865 * centi!meter
+    ];
+
+    /*alias Litre = BaseUnit!("litre", "L");
+    Quantity!Litre sphereVolume(Quantity!Metre diameter) {
+        Quantity!Metre radius = diameter / 2;
+        return Litre.init* 3 * (radius*radius*radius).toValue / 4000;
+    }
+    auto ballCapacity = sphereVolume(40.0 * centi!meter);*/
 }
 
 auto cos(Q)(Q angle)
