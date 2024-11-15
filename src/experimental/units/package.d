@@ -70,6 +70,7 @@ module experimental.units;
  */
 
 import std.typetuple : AliasSeq, allSatisfy, staticMap;
+import std.traits;
 
 version(autoConvert) enum autoConvert = true;
 else enum autoConvert = false;
@@ -201,33 +202,30 @@ enum UnitString
     symbol /// Use unit symbols when constructing strings.
 }
 
+// KLUDGE: To avoid operator overloading ambiguities due to the
+// opBinaryRight definitions in the dummy unit instances and Quantity,
+// we need to know whether a type is a unit or not.
+// Another solution would be to limit the possible unit types to
+// BaseUnit/DerivedUnit/… instances, but this is not really desirable,
+// especially because units with large custom type conversion tables
+// are often clearer as custom structs.
+enum isUnit(T) = __traits(compiles, T.SuperSecretAliasToMarkThisAsUnit);
+
+template isUnitInstance(alias T)
+{
+    import std.traits;
+    static if (isType!T)
+    {
+        enum isUnitInstance = false;
+    }
+    else
+    {
+        enum isUnitInstance = isUnit!(typeof(T));
+    }
+}
+
 private
 {
-    // KLUDGE: To avoid operator overloading ambiguities due to the
-    // opBinaryRight definitions in the dummy unit instances and Quantity,
-    // we need to know whether a type is a unit or not.
-    // Another solution would be to limit the possible unit types to
-    // BaseUnit/DerivedUnit/… instances, but this is not really desirable,
-    // especially because units with large custom type conversion tables
-    // are often clearer as custom structs.
-    enum isUnit(T) = __traits(compiles, T.SuperSecretAliasToMarkThisAsUnit);
-
-    template isUnitInstance(alias T)
-    {
-        static if (!__traits(compiles, isUnit!T))
-        {
-            enum isUnitInstance = isUnit!(typeof(T));
-        }
-        else static if (!isUnit!T)
-        {
-            enum isUnitInstance = isUnit!(typeof(T));
-        }
-        else
-        {
-            enum isUnitInstance = false;
-        }
-    }
-
     /*
      * Returns a string for the unit U, falling back to stringof if U doesn't
      * have toString() defined.
@@ -776,6 +774,12 @@ struct Quantity(Unit, ValueType = double)
         opAssign(other);
     }
 
+    version (autoConvert) this(OtherU, OtherV)(const Quantity!(OtherU, OtherV) other)
+        if(!isAssignable!(ValueType, OtherV) &&
+           isFloating!ValueType && isFloating!OtherV &&
+           is(OtherU.BaseUnit : typeof(this)))
+        => this(cast(Quantity!(OtherU, ValueType))other);
+
     /// ditto
     ref Quantity opAssign(OtherU, OtherV)(Quantity!(OtherU, OtherV) other)
         if(isAssignable!(ValueType, OtherV) &&
@@ -1099,7 +1103,7 @@ struct Quantity(Unit, ValueType = double)
     auto opEquals(RhsU, RhsV)(Quantity!(RhsU, RhsV) rhs)
         if (!is(RhsU : Unit) &&
             is(typeof(ValueType.init == RhsV.init) : bool))
-        => opEquals(rhs.convert!(Quantity(Unit, RhsV))(rhs));
+        => opEquals(rhs.convert!(Unit));
 
     /**
      * Returns a string representation of the quantity, consisting of the
@@ -1246,6 +1250,9 @@ auto pow(int numerator, uint denominator = 1u, U)(U u)
     return pow!(Rational!(numerator, denominator))(u);
 }
 
+auto sqrt(U)(U u)
+    => pow!(1,2)(u);
+
 /**
  * Raises a quantity to a given power.
  *
@@ -1267,6 +1274,9 @@ auto pow(int numerator, uint denominator = 1u, Q : Quantity!(U, V), U, V)(Q q)
 {
     return pow!(Rational!(numerator, denominator))(q);
 }
+
+auto sqrt(Q: Quantity!(U, V), U, V)(Q q)
+    => pow!(1,2, Q)(q);
 
 private
 {
@@ -1436,10 +1446,10 @@ bool isConvertibleTo(alias targetUnit, Q : Quantity!(U, V), U, V)(const Q q)
 }
 
 //TODO: Make these work to determine whether a unit type is convertible to another.
-/*template isConvertibleTo(TargetUnit, SourceUnit) if (isUnitInstance!TargetUnit && isUnitInstance!SourceUnit)
+bool isConvertibleTo(TargetUnit, SourceUnit)() if (isUnit!TargetUnit && isUnit!SourceUnit)
 {
-    enum isConvertibleTo = __traits(compiles, GetConversion!(SourceUnit, TargetUnit, V).Result);
-}*/
+    return __traits(compiles, GetConversion!(SourceUnit, TargetUnit, float).Result);
+}
 
 /*template isConvertibleTo(TargetUnit, Q : Quantity!(U, V), U, V) if (isUnitInstance!TargetUnit)
 {
@@ -1827,6 +1837,12 @@ struct PrefixedUnit(BaseUnit, int exponent, alias System)
     private enum prefixBase = System.base;
 }
 
+//TODO: Use `Prefix` instance an argument.
+/*template PrefixedUnit(BaseUnit, Prefix prefix)
+{
+    alias PrefixedUnit = PrefixedUnit!(BaseUnit, prefix.exponent, )
+}*/
+
 /// ditto
 template PrefixedUnit(BaseUnit, int exponent, alias System)
     if (isPrefixedUnit!BaseUnit &&
@@ -1918,6 +1934,12 @@ template prefixTemplate(int exponent, alias System)
     {
         enum prefixTemplate = PrefixedUnit!(u, exponent, System).init;
     }
+
+    template prefixTemplate(u)
+        if (isUnit!u)
+    {
+        alias prefixTemplate = PrefixedUnit!(u, exponent, System);
+    }
 }
 
 /**
@@ -1935,17 +1957,20 @@ template prefixTemplate(int exponent, alias System)
  */
 mixin template DefinePrefixSystem(alias System)
 {
-    mixin({
+    /*mixin({
         import std.conv;
 
         string code;
-        foreach (p;
-        System.prefixes)
+        foreach (p; System.prefixes)
         {
-            code ~= "alias prefixTemplate!(" ~ to!string(p.exponent) ~ ", System) " ~ p.name ~ ";";
+            code ~= "alias "~p.name~" = prefixTemplate!(" ~ to!string(p.exponent) ~ ", System);\n";
         }
         return code;
-    }());
+    }());*/
+    import std.conv;
+    static foreach(p; System.prefixes) {
+        mixin("alias "~p.name~" = prefixTemplate!(" ~ to!string(p.exponent) ~ ", System);\n");
+    }
 }
 
 ///

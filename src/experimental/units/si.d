@@ -109,13 +109,17 @@ unittest
     mass1 = (485f * kilogram);
     assert(mass1.toValue == 485f * 10^^3);
     
-    version(autoConvert) Quantity!Gram mass2 = (485f * kilogram);
-    else Quantity!Gram mass2 = (485f * kilogram).convert!Gram;
+    version(autoConvert) Quantity!Gram mass2 = (485.0 * kilogram);
+    else Quantity!Gram mass2 = (485.0 * kilogram).convert!Gram;
     assert(mass1 == mass2);
 
     Quantity!Kilogram mass3 = mass1;
     assert(mass1.toValue == mass3.toValue*1000, format("`mass1` = %s, `mass3` = %s", mass1.toValue, mass3.toValue));
-    //assert(mass1 == mass3);
+    assert(mass1 == mass3);
+
+    Quantity!(Gram, float) mass4 = 2532.0 * milli!gram;
+    
+    //mass1 = cast(Quantity!(Gram)(423.0);
 
     alias GramPerMole = typeof(gram / mole);
     Quantity!GramPerMole molMass = mass2 / mole;
@@ -131,14 +135,17 @@ unittest
     lengthMap = [
         'a': 4545560.456 * micro!meter,
         'b': 16.73865 * centi!meter
-    ];
+    ];*/
 
-    /*alias Litre = BaseUnit!("litre", "L");
-    Quantity!Litre sphereVolume(Quantity!Metre diameter) {
+    alias Litre = BaseUnit!("litre", "L");
+    Quantity!Litre sphereVolume(Q:Quantity!(Unit, V), Unit, V)(Q diameter)
+        if(isConvertibleTo!(Unit, Metre))
+    {
         Quantity!Metre radius = diameter / 2;
-        return Litre.init* 3 * (radius*radius*radius).toValue / 4000;
+        return Litre.init* 3 * pow!(3,1)(radius).toValue / 4000;
     }
-    auto ballCapacity = sphereVolume(40.0 * centi!meter);*/
+    static assert(isConvertibleTo!(Metre, typeof(centi!metre)));
+    auto ballCapacity = sphereVolume(40.0 * centi!metre);
 }
 
 auto cos(Q)(Q angle)
