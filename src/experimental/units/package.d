@@ -1775,13 +1775,14 @@ version (unittest)
  * name of the new unit, and it is able to fold multiple prefixes of the same
  * system, e.g. $(D milli(kilo(metre))) to just $(D metre).
  */
-struct PrefixedUnit(BaseUnit, int exponent, alias System)
+struct PrefixedUnit(BaseUnit, Prefix prefix, int prefixBase)
     if (isUnit!BaseUnit &&
         !(isPrefixedUnit!BaseUnit &&
           (BaseUnit.prefixBase == System.base)))
 {
     mixin UnitImpl;
     alias Conversions = AliasSeq!(Conversion!(BaseUnit, toBase, fromBase));
+    enum exponent = prefix.exponent;
 
     static string toString(UnitString type = UnitString.name)
     {
@@ -1833,37 +1834,37 @@ struct PrefixedUnit(BaseUnit, int exponent, alias System)
     }
 
     private alias Base = BaseUnit;
-    private enum prefix = getPrefix!System(exponent);
-    private enum prefixBase = System.base;
 }
-
-//TODO: Use `Prefix` instance an argument.
-/*template PrefixedUnit(BaseUnit, Prefix prefix)
-{
-    alias PrefixedUnit = PrefixedUnit!(BaseUnit, prefix.exponent, )
-}*/
 
 /// ditto
 template PrefixedUnit(BaseUnit, int exponent, alias System)
-    if (isPrefixedUnit!BaseUnit &&
-        (BaseUnit.prefixBase == System.base))
 {
-    static if (exponent + BaseUnit.prefix.exponent == 0)
+    static if (isPrefixedUnit!BaseUnit)
     {
-        // If the exponents sum up to zero, just return the original unit.
-        alias PrefixedUnit = BaseUnit.Base;
+        static if (exponent + BaseUnit.exponent == 0)
+        {
+            // If the exponents sum up to zero, just return the original unit.
+            alias PrefixedUnit = BaseUnit.Base;
+        }
+        else
+        {
+            enum prefix = getPrefix!System((exponent + BaseUnit.exponent));
+            alias PrefixedUnit = PrefixedUnit!(BaseUnit.Base, prefix, System.base);
+        }
     }
     else
     {
-        alias PrefixedUnit = PrefixedUnit!(BaseUnit.Base, exponent + BaseUnit.prefix.exponent, System);
+        enum prefix = getPrefix!System(exponent);
+
+        alias PrefixedUnit = PrefixedUnit!(BaseUnit, prefix, System.base);
     }
 }
 
 /// ditto
-template PrefixedUnit(alias baseUnit, int exponent, alias System)
-    if (isUnitInstance!baseUnit)
+template PrefixedUnit(alias unit, int exponent, alias System)
+    if (isUnitInstance!unit)
 {
-    alias PrefixedUnit = PrefixedUnit!(typeof(baseUnit), exponent, System);
+    alias PrefixedUnit = PrefixedUnit!(typeof(unit), exponent, System);
 }
 
 /**
@@ -1903,7 +1904,7 @@ struct Prefix
  * ]; }) System;
  * ---
  */
-template PrefixSystem(long systemBase, alias getPrefixes)
+template PrefixSystem(int systemBase, alias getPrefixes)
     if (is(typeof(getPrefixes()) : Prefix[]))
 {
     enum base = systemBase;
@@ -1978,6 +1979,8 @@ mixin template DefinePrefixSystem(alias System)
 {
     alias System = PrefixSystem!(10, { return [Prefix(-6, "micro", "µ"), Prefix(-3, "milli", "m"), Prefix(3, "kilo", "k")]; });
 
+    static assert(!isPrefixedUnit!Foo);
+    
     alias kilo = prefixTemplate!(3, System);
     alias milli = prefixTemplate!(-3, System);
 
@@ -1986,7 +1989,9 @@ mixin template DefinePrefixSystem(alias System)
     assert(kilofoo.toString() == "kilofoo");
     assert(kilofoo.toString(UnitString.symbol) == "kf");
 
-    static assert(is(typeof(milli!(kilo!foo)) == Foo));
+    static assert(isPrefixedUnit!(typeof(kilofoo)));
+    static assert(is(typeof(milli!(kilo!foo)) == Foo), typeof(milli!(kilo!foo)));
+    pragma(msg, "Passed static asserts.");
 
     enum microfoo = milli!(milli!foo);
     assert(microfoo.toString() == "microfoo");
@@ -2011,7 +2016,7 @@ private
         // of relying on the mangled names or such).
         static if (__traits(compiles, T.Base))
         {
-            enum isPrefixedUnit = isUnit!(T.Base) && is(typeof(T.prefixBase) : long);
+            enum isPrefixedUnit = isInstanceOf!(PrefixedUnit, T);
         }
         else
         {
